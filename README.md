@@ -2,22 +2,47 @@
 
 Built on top of [TAS](https://github.com/tcp-acceleration-service/tas).
 
-BlueTAS is a way of offloading the fast and slow path of TAS from the CPU of a machine to the cores of a SmartNIC. 
+BlueTAS is an implementation of offloading the fast and slow path of TAS from the CPU of the host machine to the cores of a SmartNIC. 
+
+## Overview
+
+The repo consists of three main components - `lib`, `tas_host` and `tas_nic`. The interaction between the three and the application can be summarized in the following figure:
+
+```
+------------------        --------------    |    -------------
+|  App  | libTAS |  <==>  |  tas_host  |  <=|=>  |  tas_nic  |
+------------------        --------------    |    -------------
+                    HOST                    |         NIC
+```
+
+`lib` consists of the application interface which is needed to be preloaded as a shared object when running any application.  
+`tas_host` is the part of the TAS stack that is implemented to be run on the host - specifically, it houses the implementatio to connect and flush to the RDMA queues on the NIC.  
+`tas_nic` is the fast and slow path of TAS that runs on the NIC.  
 
 ## How to run
 
-Some defintions. A host refers to the main compute machine on which applications are run. Inside the host, there is a SmartNIC. We can run applications on SmartNIC too. So, on the host, we run:
+*Some definitions:* A host refers to the main compute machine on which applications are run. Inside the host, there is a SmartNIC. We can run applications on SmartNIC too.
 
-`arp -s [IP_address_of_SmartNIC] [MAC_address_of_SmartNIC]`
+### BlueTAS Setup
+So, on the host, we run:
 
-`tas_host/tas_host`
-
-and for each application, we run
-
-`LD_PRELOAD=lib/libtas_interpose.so application_binary application_args`
+```bash
+$ arp -s [IP_address_of_SmartNIC] [MAC_address_of_SmartNIC]`
+$ tas_host/tas_host
+```
 
 On the SmartNIC, we run:
 
-`sudo tas_nic/tas_nic --ip-addr=10.0.0.170/24 --fp-cores-max=2 --nic-ip=10.0.0.170 --nic-port=39244 --shm-len=536870912 --nic-port=39244 `
+```bash
+$ sudo tas_nic/tas_nic --ip-addr=10.0.0.170/24 --fp-cores-max=2 --nic-ip=10.0.0.170 --nic-port=39244 --shm-len=536870912
+```
 
 where `10.0.0.170` is the ip-address of the smartNIC. 
+
+### Run
+
+To run an application using TAS, we run
+
+```bash
+$ LD_PRELOAD=lib/libtas_interpose.so application_binary application_args
+```
