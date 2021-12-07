@@ -26,7 +26,6 @@ LINK = $(CC) $(LDFLAGS)
 # Link shared library from objects
 LINK.so = $(CC) $(LDFLAGS) -shared
 %.so:
-	echo $(LDLIBS)
 	$(LINK.so) $^ $(LDLIBS) $(OUTPUT_OPTION.c)
 
 %.d: ;

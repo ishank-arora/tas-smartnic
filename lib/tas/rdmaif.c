@@ -167,7 +167,6 @@ static int handle_recv_app_reg_ack(struct rdma_connection* conn, const struct rd
         ctx->flags |= RAPPC_APP_ACKED;
     } else {
         ctx->flags |= RAPPC_APP_ERR;
-        fprintf(stderr, "handle_recv_app_reg_ack: registration failed\n");
     }
     return 0;
 }
@@ -181,15 +180,15 @@ static int handle_recv_ctx_reg_ack(struct rdma_connection* conn, const struct rd
     return 0;
 }
 
-int rdma_init(int* fd, volatile struct flexnic_info* fi) {
+int rdma_init(int* fd) {
     epfd = epoll_create1(0);
     assert(epfd != -1);
 
     struct addrinfo* addr = NULL;
-    uint32_t ip32 = ntohl(fi->nic_ip);
+    uint32_t ip32 = ntohl(flexnic_info->nic_ip);
     char ip[INET_ADDRSTRLEN];
     char port[6];
-    snprintf(port, 6, "%d", fi->nic_port);
+    snprintf(port, 6, "%d", flexnic_info->nic_port);
     const void* iprv;
     iprv = inet_ntop(AF_INET, &ip32, ip, INET_ADDRSTRLEN);
     if (iprv == NULL) {
@@ -197,6 +196,7 @@ int rdma_init(int* fd, volatile struct flexnic_info* fi) {
         goto error_exit;
     }
 
+    printf("Connecting to %s:%d\n", ip, flexnic_info->nic_port); 
     if (getaddrinfo(ip, port, NULL, &addr) != 0) {
         fprintf(stderr, "nicif_init: getaddrinfo failed\n");
         goto error_exit;

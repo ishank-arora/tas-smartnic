@@ -68,24 +68,23 @@ int flexnic_driver_connect(struct flexnic_info **p_info, void **p_mem_start)
     goto error_unmap_info;
   }
 
+  /* open and map dma shm region */
+  if ((fi->flags & FLEXNIC_FLAG_HUGEPAGES) == FLEXNIC_FLAG_HUGEPAGES) {
+    m = map_region_huge(FLEXNIC_NAME_DMA_MEM, fi->dma_mem_size);
+  } else {
+    m = map_region(FLEXNIC_NAME_DMA_MEM, fi->dma_mem_size);
+  }
+  if (m == NULL) {
+    perror("flexnic_driver_connect: mapping dma memory failed");
+    goto error_unmap_info;
+  }
+
   if (fi->nic_ip != 0) {
-    printf("flexnic_driver_connect: detected tas running on NIC separately\n");
     int rv;
-    if ((rv = rdma_init(&rdmafd, fi)) != 0) {
+    if ((rv = rdma_init(&rdmafd)) != 0) {
       fprintf(stderr, "flexnic_driver_connect: rdma_init failed\n");
     }
   } else {
-    printf("flexnic_driver_connect: detected tas running on the same machine\n");
-    /* open and map dma shm region */
-    if ((fi->flags & FLEXNIC_FLAG_HUGEPAGES) == FLEXNIC_FLAG_HUGEPAGES) {
-      m = map_region_huge(FLEXNIC_NAME_DMA_MEM, fi->dma_mem_size);
-    } else {
-      m = map_region(FLEXNIC_NAME_DMA_MEM, fi->dma_mem_size);
-    }
-    if (m == NULL) {
-      perror("flexnic_driver_connect: mapping dma memory failed");
-      goto error_unmap_info;
-    }
     rdmafd = -1;
   }
 

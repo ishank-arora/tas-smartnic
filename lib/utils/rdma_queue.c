@@ -216,35 +216,6 @@ ssize_t rq_flush(struct rdma_queue* queue) {
     return rq_nflush(queue, bytes_remaining_to_flush);
 }
 
-ssize_t rq_nbytes_can_reserve(struct rdma_queue* queue) {
-    assert(queue->endpoints.tx.addr == (uintptr_t) queue);
-    uint64_t max_bytes_can_flush = rq_nbytes_max_flush(queue);
-    uint64_t bytes_to_flush = rq_nbytes_to_flush(queue);
-    uint64_t max_add_bytes = max_bytes_can_flush - bytes_to_flush;
-    if (!queue->endpoints.paired) {
-        assert(max_bytes_can_flush >= bytes_to_flush);
-        return max_add_bytes;
-    } else if (max_bytes_can_flush <= bytes_to_flush) {
-        struct protected_address from;
-        struct protected_address to;
-        from.key = queue->endpoints.tx.lkey;
-        to.key = queue->endpoints.rx.rkey;
-        from.addr = (uintptr_t) &queue->endpoints.rx.offset;
-        to.addr = queue->endpoints.rx.addr + offsetof(struct rdma_queue, endpoints.rx.offset);
-        if (rdma_read(queue->qp, from, to, sizeof(queue->endpoints.rx.offset)) != 0) {
-            fprintf(stderr, "rq_flush: failed to read rx.offset from remote\n");
-            return -1;
-        }
-        if (max_bytes_can_flush < bytes_to_flush) {
-            return 0;
-        } else {
-            return max_bytes_can_flush - bytes_to_flush;
-        }
-    } else {
-        return max_bytes_can_flush - bytes_to_flush;
-    }
-}
-
 int rq_try_reserve_flush(struct rdma_queue* queue, size_t to_flush) {
     assert(queue->endpoints.tx.addr == (uintptr_t) queue);
     for (int i = 0; i < 2; i++) {

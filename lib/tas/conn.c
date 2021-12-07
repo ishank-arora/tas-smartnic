@@ -94,8 +94,8 @@ int flextcp_listen_open(struct flextcp_context *ctx,
 }
 
 static int flextcp_create_tcp_buffer(struct flextcp_connection* conn, uint64_t* rx_opaque, uint64_t* tx_opaque, uint32_t* lkey, uint32_t* rkey) {
-  size_t tx_len = sizeof(struct rdma_queue) + tas_info->tcp_txbuf_len;
-  size_t rx_len = sizeof(struct rdma_queue) + tas_info->tcp_rxbuf_len;
+  size_t tx_len = sizeof(struct rdma_queue) + flexnic_info->tcp_rxbuf_len;
+  size_t rx_len = sizeof(struct rdma_queue) + flexnic_info->tcp_txbuf_len;
   size_t bytes_needed = tx_len + rx_len;
   // allocate necessary queues
   void* base = malloc(bytes_needed);
@@ -113,11 +113,8 @@ static int flextcp_create_tcp_buffer(struct flextcp_connection* conn, uint64_t* 
   }
   conn->rx = rq_allocate_in_place(base, rx_len, nic_conn->qp, 
     conn->q_mr->lkey, conn->q_mr->rkey);
-  assert(conn->rx->buffer_size == tas_info->tcp_rxbuf_len);
   conn->tx = rq_allocate_in_place((void*) ((uintptr_t) base + rx_len), 
     tx_len, nic_conn->qp, conn->q_mr->lkey, conn->q_mr->rkey);
-  assert((uintptr_t) conn->rx + sizeof(struct rdma_queue) + conn->rx->buffer_size == (uintptr_t) conn->tx);
-  assert((uintptr_t) conn->rx + bytes_needed == (uintptr_t) conn->tx + conn->tx->buffer_size + sizeof(struct rdma_queue));
   *rx_opaque = (uint64_t) conn->rx;
   *tx_opaque = (uint64_t) conn->tx;
   *lkey = conn->q_mr->lkey;
@@ -294,8 +291,7 @@ ssize_t flextcp_connection_tx_alloc(struct flextcp_connection *conn, size_t len,
   if ((conn->flags & CONN_FLAG_TXEOS) == CONN_FLAG_TXEOS)
     return -1;
 
-  avail = rq_nbytes_can_reserve(conn->tx);
-  assert(avail >= 0);
+  avail = rq_nbytes_empty(conn->tx);
   /* truncate if necessary */
   if (avail < len) {
     len = avail;
@@ -326,8 +322,7 @@ ssize_t flextcp_connection_tx_alloc2(struct flextcp_connection *conn, size_t len
     return -1;
 
   /* truncate if necessary */
-  avail = rq_nbytes_can_reserve(conn->tx);
-  assert(avail >= 0);
+  avail = rq_nbytes_empty(conn->tx);
   /* truncate if necessary */
   if (avail < len) {
     len = avail;
@@ -364,11 +359,6 @@ int flextcp_connection_tx_send(struct flextcp_context *ctx,
     fprintf(stderr, "flextcp_connection_tx_send: enqueue failed\n");
     abort();
   }
-  // if ((rv = rq_nflush(conn->tx, len)) != len) {
-  //   assert(rv < 0);
-  //   fprintf(stderr, "flextcp_connection_tx_flush: flush failed\n");
-  //   abort();
-  // }
 
   conn->txb_allocated -= len;
   conn->txb_bump += len;
