@@ -62,10 +62,9 @@ int rdma_send_msg(struct rdma_connection* conn, struct rdma_msg msg) {
         conn->send_off -= RC_MAX_OUTGOING;
     }
     conn->n_to_send++;
-    assert((uintptr_t) conn->send_buffer_mr->addr <= (uintptr_t) send_buffer);
-    assert((uintptr_t) conn->send_buffer_mr->addr + conn->send_buffer_mr->length >= (uintptr_t) send_buffer);
     printf("sending buffer at addr %lx, idx: %ld\n", (uintptr_t) send_buffer, conn->send_off);
     sge.addr = (uintptr_t) send_buffer;
+    
 
     struct rdma_buffer_addrs* addrs;
     addrs = malloc(sizeof(*addrs));
@@ -95,13 +94,8 @@ int rdma_write_with_imm(struct rdma_connection* conn,
     struct ibv_send_wr wr;
     struct ibv_send_wr* bad_wr;
 
-    struct rdma_buffer_addrs* addrs;
-    addrs = malloc(sizeof(*addrs));
-    addrs->conn = conn;
-    addrs->buffer = NULL; 
-
     memset(&wr, 0, sizeof(wr));
-    wr.wr_id = (uintptr_t) addrs;
+    wr.wr_id = (uintptr_t) conn;
     wr.opcode = IBV_WR_RDMA_WRITE_WITH_IMM;
     wr.sg_list = &sge;
     wr.num_sge = 1;

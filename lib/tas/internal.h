@@ -57,7 +57,7 @@ enum conn_state {
 };
 
 extern void *flexnic_mem;
-extern struct flexnic_info *flexnic_info;
+extern struct flexnic_info *tas_info;
 extern int flexnic_evfd[FLEXTCP_MAX_FTCPCORES];
 
 int flextcp_kernel_connect(void);
@@ -74,6 +74,6 @@ int flextcp_conn_pushtxeos(struct flextcp_context *ctx,
 
 extern struct rdma_connection* nic_conn;
 extern struct rdma_context* nic_ctx;
-int rdma_init(int* fd);
+int rdma_init(int* fd, volatile struct flexnic_info* info);
 
 #endif /* ndef INTERNAL_H_ */

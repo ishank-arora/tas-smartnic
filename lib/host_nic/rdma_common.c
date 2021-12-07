@@ -70,12 +70,10 @@ int rdma_common_on_completion(
             return -1;
         }
 
-
         struct rdma_buffer_addrs* addrs = (struct rdma_buffer_addrs*) wc.wr_id;
         int rv;
         if (wc.opcode & IBV_WC_RECV) {
             struct rdma_msg msg = *addrs->buffer;
-            printf("rdma_common_on_completion: successful message: %d\n", msg.type);
             MEM_BARRIER();
             if (rdma_common_post_receive_buffer(addrs->conn, addrs->buffer) != 0) {
                 fprintf(stderr, "rdma_common_on_completion: failed to post receive buffer\n");
@@ -148,7 +146,6 @@ int rdma_common_post_receive_buffer(struct rdma_connection* conn, struct rdma_ms
     wr.sg_list = &sge;
     wr.num_sge = 1;
 
-    // printf("posting address %lx\n", (uintptr_t) to_post);
     sge.addr = (uintptr_t) to_post;
     sge.length = sizeof(struct rdma_msg);
     sge.lkey = conn->receive_buffer_mr->lkey;
@@ -319,7 +316,6 @@ struct rdma_connection* rdma_common_build_connection(struct rdma_cm_id* id, stru
 
     /* post receives */
     for (int bi = 0; bi < RC_MAX_INGOING; bi++) {
-        assert((uintptr_t) &conn->receive_buffer[bi] - (uintptr_t) conn->receive_buffer < RC_MAX_OUTGOING * sizeof(struct rdma_msg));
         if (rdma_common_post_receive_buffer(conn, &conn->receive_buffer[bi]) != 0) {
             fprintf(stderr, "on_connect_request: failed to post receive buffer\n");
             return NULL;
