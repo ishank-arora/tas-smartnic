@@ -4,6 +4,8 @@ Built on top of [TAS](https://github.com/tcp-acceleration-service/tas).
 
 BlueTAS is an implementation of offloading the fast and slow path of TAS from the CPU of the host machine to the cores of a SmartNIC. 
 
+Here is our [report](Report.pdf) the details BlueTAS' functionality. 
+
 ## Overview
 
 The repo consists of three main components - `lib`, `tas_host` and `tas_nic`. The interaction between the three and the application can be summarized in the following figure:
