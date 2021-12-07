@@ -49,7 +49,7 @@ void flextcp_kernel_kick(void)
 
   /* fprintf(stderr, "kicking kernel?\n"); */
 
-  if(now - last_ts > flexnic_info->poll_cycle_tas) {
+  if(now - last_ts > tas_info->poll_cycle_tas) {
     // Kick kernel
     /* fprintf(stderr, "kicking kernel\n"); */
     assert(kernel_evfd != 0);
@@ -106,7 +106,8 @@ int flextcp_kernel_connect(void)
   /* receive welcome message:
   *   contains the fd for the kernel, and the count of flexnic fds */
   if ((r = recvmsg(fd, &msg, 0)) != sizeof(uint32_t)) {
-    fprintf(stderr, "flextcp_kernel_connect: recvmsg failed (%zd)\n", r);
+    fprintf(stderr, "flextcp_kernel_connect: recvmsg failed (bytes sent: %zd error: %s)\n", 
+      r, strerror(errno));
     abort();
   }
 
@@ -153,11 +154,17 @@ int flextcp_kernel_connect(void)
       flexnic_evfd[off++] = pfd[i];
     }
   }
-  if (rdmafd == -1) { 
-    ksock_fd = fd;
-  } else {
+  ksock_fd = fd;
+  if (rdmafd != -1) {
+    while (nic_conn == NULL || nic_conn->context == NULL) {
+      if (on_rdmaif_event() != 0) {
+        fprintf(stderr, "flextcp_kernel_connect: failed to handle event\n");
+        abort();
+      }
+    }
+
     struct rdma_app_context* ctx = nic_conn->context;
-    while ((ctx->flags & RAPPC_APP_ACKED) == 0 || 
+    while ((ctx->flags & RAPPC_APP_ACKED) == 0 && 
           (ctx->flags & RAPPC_APP_ERR) == 0) 
     {
       if (on_rdmaif_event() != 0) {
@@ -166,7 +173,7 @@ int flextcp_kernel_connect(void)
       }
     }
 
-    if ((ctx->flags & RAPPC_APP_ERR) == 0) {
+    if ((ctx->flags & RAPPC_APP_ERR) != 0) {
       fprintf(stderr, "flextcp_kernel_connect: failed to connect\n");
       abort();
     }
@@ -176,43 +183,49 @@ int flextcp_kernel_connect(void)
 
 int flextcp_kernel_newctx(struct flextcp_context *ctx)
 {
-  if (rdmafd == -1) {
-    ssize_t sz, off, total_sz;
-    struct kernel_uxsock_response *resp;
-    uint8_t resp_buf[sizeof(*resp) +
-        FLEXTCP_MAX_FTCPCORES * sizeof(resp->flexnic_qs[0])];
-    struct kernel_uxsock_request req = {
+  struct kernel_uxsock_request req = {
         .rxq_len = NIC_RXQ_LEN,
         .txq_len = NIC_TXQ_LEN,
       };
-    uint16_t i;
+  /* send request on kernel socket */
+  struct iovec iov;
+  memset(&iov, 0, sizeof(iov));
+  iov.iov_base = &req;
+  iov.iov_len = sizeof(req);
+  union {
+    char buf[CMSG_SPACE(sizeof(int))];
+    struct cmsghdr align;
+  } u;
+  struct msghdr msg;
+  memset(&msg, 0, sizeof(msg));
+  msg.msg_name = NULL;
+  msg.msg_namelen = 0;
+  msg.msg_iov = &iov;
+  msg.msg_iovlen = 1;
+  msg.msg_control = &u.buf;
+  msg.msg_controllen = sizeof(u.buf);
+  msg.msg_flags = 0;
 
-    /* send request on kernel socket */
-    struct iovec iov = {
-      .iov_base = &req,
-      .iov_len = sizeof(req),
-    };
-    union {
-      char buf[CMSG_SPACE(sizeof(int))];
-      struct cmsghdr align;
-    } u;
-    struct msghdr msg = {
-      .msg_name = NULL,
-      .msg_namelen = 0,
-      .msg_iov = &iov,
-      .msg_iovlen = 1,
-      .msg_control = u.buf,
-      .msg_controllen = sizeof(u.buf),
-      .msg_flags = 0,
-    };
-    struct cmsghdr *cmsg = CMSG_FIRSTHDR(&msg);
-    cmsg->cmsg_level = SOL_SOCKET;
-    cmsg->cmsg_type = SCM_RIGHTS;
-    cmsg->cmsg_len = CMSG_LEN(sizeof(int));
-    int *myfd = (int *)CMSG_DATA(cmsg);
-    *myfd = ctx->evfd;
-    sz = sendmsg(ksock_fd, &msg, 0);
-    assert(sz == sizeof(req));
+  struct cmsghdr *cmsg = CMSG_FIRSTHDR(&msg);
+  cmsg->cmsg_level = SOL_SOCKET;
+  cmsg->cmsg_type = SCM_RIGHTS;
+  cmsg->cmsg_len = CMSG_LEN(sizeof(int));
+  int *myfd = (int *)CMSG_DATA(cmsg);
+  *myfd = ctx->evfd;
+
+  ssize_t sz = sendmsg(ksock_fd, &msg, 0);
+  if (sz != sizeof(req)) {
+    fprintf(stderr, "flextcp_kernel_newctx: failed to send %ld bytes "
+      "(fd: %d, error: %s)\n", sz, ksock_fd, strerror(errno));
+    abort();
+  }
+  
+  if (rdmafd == -1) {
+    ssize_t off, total_sz;
+    struct kernel_uxsock_response *resp;
+    uint8_t resp_buf[sizeof(*resp) +
+        FLEXTCP_MAX_FTCPCORES * sizeof(resp->flexnic_qs[0])];
+    uint16_t i;
 
     /* receive response on kernel socket */
     resp = (struct kernel_uxsock_response *) resp_buf;
@@ -264,12 +277,18 @@ int flextcp_kernel_newctx(struct flextcp_context *ctx)
       ctx->queues[i].last_ts = 0;
     }
   } else {
+    int host_ctx_fd;
+    if (read(ksock_fd, &host_ctx_fd, sizeof(host_ctx_fd)) != sizeof(host_ctx_fd)) {
+      fprintf(stderr, "flextcp_kernel_newctx: failed to receive host fd\n");
+      abort();
+    }
+
     /* allocate memory queues */
-    uint64_t kin_qsize = flexnic_info->kin_len + sizeof(struct rdma_queue);
-    uint64_t kout_qsize = flexnic_info->kout_len + sizeof(struct rdma_queue);
+    uint64_t kin_qsize = tas_info->kin_len + sizeof(struct rdma_queue);
+    uint64_t kout_qsize = tas_info->kout_len + sizeof(struct rdma_queue);
     uint64_t nic_rx_len = NIC_RXQ_LEN + sizeof(struct rdma_queue);
     uint64_t nic_tx_len = NIC_TXQ_LEN + sizeof(struct rdma_queue);
-    uint64_t bytes_needed = kin_qsize + kout_qsize + (nic_rx_len + nic_tx_len) * flexnic_info->cores_num;
+    uint64_t bytes_needed = kin_qsize + kout_qsize + (nic_rx_len + nic_tx_len) * tas_info->cores_num;
     void* ctx_buffer = malloc(bytes_needed);
     /* register ctx buffer */
     struct ibv_mr* ctx_buffer_mr; // TODO: store this somewhere
@@ -289,7 +308,7 @@ int flextcp_kernel_newctx(struct flextcp_context *ctx)
     offset += kin_qsize;
     ctx->kout = rq_allocate_in_place((void*) (ctx_buffer_opaque + offset), kout_qsize, nic_conn->qp, ctx_buffer_mr->lkey, ctx_buffer_mr->rkey);
     offset += kout_qsize;
-    for (int i = 0; i < flexnic_info->cores_num; i++) {
+    for (int i = 0; i < tas_info->cores_num; i++) {
       ctx->queues[i].rx = rq_allocate_in_place((void*) (ctx_buffer_opaque + offset), nic_rx_len, nic_conn->qp, ctx_buffer_mr->lkey, ctx_buffer_mr->rkey);
       offset += nic_rx_len;
       ctx->queues[i].tx = rq_allocate_in_place((void*) (ctx_buffer_opaque + offset), nic_tx_len, nic_conn->qp, ctx_buffer_mr->lkey, ctx_buffer_mr->rkey);
@@ -306,7 +325,7 @@ int flextcp_kernel_newctx(struct flextcp_context *ctx)
     ctx_reg.memq_base = (uintptr_t) ctx_buffer;
     ctx_reg.rx_len = NIC_RXQ_LEN;
     ctx_reg.tx_len = NIC_TXQ_LEN;
-    ctx_reg.ctx_evfd = ctx->evfd;
+    ctx_reg.ctx_evfd = host_ctx_fd;
     msg.data.ctx_reg = ctx_reg;
 
     if (rdma_send_msg(nic_conn, msg) != 0) {
@@ -322,6 +341,11 @@ int flextcp_kernel_newctx(struct flextcp_context *ctx)
       }
     }
     nic_app_ctx->flags &= ~RAPPC_CTX_ACKED;
+    MEM_BARRIER();
+
+    ctx->db_id = nic_app_ctx->rctx_info.flexnic_db_id;
+    ctx->num_queues = nic_app_ctx->rctx_info.flexnic_qs_num;
+    ctx->next_queue = 0;
 
     /* pair txs with rxs */
     offset = 0;
@@ -332,15 +356,14 @@ int flextcp_kernel_newctx(struct flextcp_context *ctx)
     recv_endpoint.addr = nic_app_ctx->rctx_info.memq_base;
 
     int rv;
-
+    rv = rq_pair_receiver(ctx->kin, recv_endpoint);
+    assert(rv == 0);
     offset += kin_qsize;
     recv_endpoint.addr += kin_qsize;
 
-    rv = rq_pair_receiver(ctx->kout, recv_endpoint);
-    assert(rv == 0);
     offset += kout_qsize;
     recv_endpoint.addr += kout_qsize;
-    for (int i = 0; i < flexnic_info->cores_num; i++) {
+    for (int i = 0; i < tas_info->cores_num; i++) {
       offset += nic_rx_len;
       recv_endpoint.addr += nic_rx_len;
       
@@ -350,8 +373,6 @@ int flextcp_kernel_newctx(struct flextcp_context *ctx)
       recv_endpoint.addr += nic_tx_len;
     }
   }
-  
-
   return 0;
 }
 

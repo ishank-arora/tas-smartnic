@@ -17,11 +17,18 @@ $(LIB_SOCKETS_SOBJS): CPPFLAGS += $(LIB_SOCKETS_CPPFLAGS)
 $(LIB_SINT_OBJS): CPPFLAGS += $(LIB_SOCKETS_CPPFLAGS)
 $(LIB_SINT_SOBJS): CPPFLAGS += $(LIB_SOCKETS_CPPFLAGS)
 
-lib/libtas_sockets.so: $(LIB_SOCKETS_SOBJS) $(LIB_TAS_SOBJS) \
+sockets_lib = lib/libtas_sockets.so
+interpose_lib = lib/libtas_interpose.so
+
+$(sockets_lib): LDFLAGS += $(RDMA_LDFLAGS)
+$(sockets_lib): LDLIBS += $(RDMA_LDLIBS)
+$(sockets_lib): $(LIB_SOCKETS_SOBJS) $(LIB_TAS_SOBJS) \
   $(LIB_UTILS_SOBJS)
 
-lib/libtas_interpose.so: $(LIB_SINT_SOBJS) $(LIB_SOCKETS_SOBJS) \
-  $(LIB_TAS_SOBJS) $(LIB_UTILS_SOBJS)
+$(interpose_lib): LDFLAGS += $(RDMA_LDFLAGS)
+$(interpose_lib): LDLIBS += $(RDMA_LDLIBS)
+$(interpose_lib): $(LIB_SINT_SOBJS) $(LIB_SOCKETS_SOBJS) \
+  $(LIB_TAS_SOBJS) $(LIB_UTILS_SOBJS) $(HOST_NIC_SOBJS)
 
 DEPS += $(allobjs:.o=.d)
 CLEAN += $(allobjs) lib/libtas_sockets.so lib/libtas_interpose.so

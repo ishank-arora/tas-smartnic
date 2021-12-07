@@ -75,8 +75,8 @@ include $(dir)/rules.mk
 dir := tas_host
 include $(dir)/rules.mk
 
-dir := tas_nic
-include $(dir)/rules.mk
+#dir := tas_nic
+#include $(dir)/rules.mk
 
 dir := tools
 include $(dir)/rules.mk

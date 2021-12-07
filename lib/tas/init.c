@@ -70,13 +70,13 @@ static void conns_bump(struct flextcp_context *ctx) __attribute__((noinline));
 // static void txq_probe(struct flextcp_context *ctx, unsigned n) __attribute__((noinline));
 
 void *flexnic_mem = NULL;
-struct flexnic_info *flexnic_info = NULL;
+struct flexnic_info *tas_info = NULL;
 int flexnic_evfd[FLEXTCP_MAX_FTCPCORES];
 int rdmafd;
 
 int flextcp_init(void)
 {
-  if (flexnic_driver_connect(&flexnic_info, &flexnic_mem) != 0) {
+  if (flexnic_driver_connect(&tas_info, &flexnic_mem) != 0) {
     fprintf(stderr, "flextcp_init: connecting to flexnic failed\n");
     return -1;
   }
@@ -133,18 +133,24 @@ static int kernel_poll(struct flextcp_context *ctx, int num,
 
     type = kout.type;
     if (type == KERNEL_APPIN_CONN_OPENED) {
+      printf("Connection opened\n");
       j = event_kappin_conn_opened(&kout.data.conn_opened, &events[i],
           num - i);
     } else if (type == KERNEL_APPIN_LISTEN_NEWCONN) {
+      printf("New connection\n");
       event_kappin_listen_newconn(&kout.data.listen_newconn, &events[i]);
     } else if (type == KERNEL_APPIN_ACCEPTED_CONN) {
+      printf("Connection accepted\n");
       j = event_kappin_accept_conn(&kout.data.accept_connection, &events[i],
           num - i);
     } else if (type == KERNEL_APPIN_STATUS_LISTEN_OPEN) {
+      printf("Listen opened\n");
       event_kappin_st_listen_open(&kout.data.status, &events[i]);
     } else if (type == KERNEL_APPIN_STATUS_CONN_MOVE) {
+      printf("Connection moved\n");
       event_kappin_st_conn_move(&kout.data.status, &events[i]);
     } else if (type == KERNEL_APPIN_STATUS_CONN_CLOSE) {
+      printf("Connection closed\n");
       event_kappin_st_conn_closed(&kout.data.status, &events[i]);
     } else {
       fprintf(stderr, "flextcp_context_poll: unexpected kout type=%u\n",
@@ -453,12 +459,12 @@ static void flextcp_flexnic_kick(struct flextcp_context *ctx, int core)
 {
   uint64_t now = util_rdtsc();
 
-  if (flexnic_info->poll_cycle_tas == UINT64_MAX) {
+  if (tas_info->poll_cycle_tas == UINT64_MAX) {
     /* blocking for TAS disabled */
     return;
   }
 
-  if(now - ctx->queues[core].last_ts > flexnic_info->poll_cycle_tas) {
+  if(now - ctx->queues[core].last_ts > tas_info->poll_cycle_tas) {
     // Kick
     uint64_t val = 1;
     int r = write(flexnic_evfd[core], &val, sizeof(uint64_t));
@@ -494,6 +500,8 @@ static inline int event_kappin_conn_opened(
   outev->ev.conn_open.conn = conn;
 
   uint64_t enqueued_bytes = 0;
+  assert(conn->rx->endpoints.rx.addr == (uintptr_t) conn->rx);
+  assert(conn->tx->endpoints.tx.addr == (uintptr_t) conn->tx);
   if (inev->status != 0) {
     conn->status = CONN_CLOSED;
     return 1;
@@ -516,6 +524,8 @@ static inline int event_kappin_conn_opened(
   conn->flow_id = inev->flow_id;
   conn->fn_core = inev->fn_core;
 
+  assert(conn->rx->endpoints.rx.addr == (uintptr_t) conn->rx);
+  assert(conn->tx->endpoints.tx.addr == (uintptr_t) conn->tx);
   if (rdmafd == -1) {
     conn->rx = (struct rdma_queue*) (flexnic_mem + inev->rx_off);
     conn->tx = (struct rdma_queue*) (flexnic_mem + inev->tx_off);
@@ -526,6 +536,7 @@ static inline int event_kappin_conn_opened(
     rx_endpoint.addr = app_ctx->rapp_info.tas_shm_opaque + inev->tx_off;
     rx_endpoint.lkey = app_ctx->rapp_info.tas_shm_lkey;
     rx_endpoint.rkey = app_ctx->rapp_info.tas_shm_rkey;
+    rx_endpoint.offset = 0;
     rv = rq_pair_receiver(conn->tx, rx_endpoint);
     assert(rv == 0);
   }
@@ -610,6 +621,7 @@ static inline int event_kappin_accept_conn(
     rx_endpoint.addr = app_ctx->rapp_info.tas_shm_opaque + inev->tx_off;
     rx_endpoint.lkey = app_ctx->rapp_info.tas_shm_lkey;
     rx_endpoint.rkey = app_ctx->rapp_info.tas_shm_rkey;
+    rx_endpoint.offset = 0;
     rv = rq_pair_receiver(conn->tx, rx_endpoint);
     assert(rv == 0);
   }
@@ -923,7 +935,7 @@ int flextcp_context_canwait(struct flextcp_context *ctx)
    */
 
   /* if blocking is disabled, we can never wait */
-  if (flexnic_info->poll_cycle_app == UINT64_MAX) {
+  if (tas_info->poll_cycle_app == UINT64_MAX) {
     return -1;
   }
 
@@ -938,7 +950,7 @@ int flextcp_context_canwait(struct flextcp_context *ctx)
   /* from here on we know that there are no events */
   if ((ctx->flags & CTX_FLAG_WANTWAIT) != 0) {
     /* in want wait state: just wait for grace period to be over */
-    if ((util_rdtsc() - ctx->last_inev_ts) > flexnic_info->poll_cycle_app) {
+    if ((util_rdtsc() - ctx->last_inev_ts) > tas_info->poll_cycle_app) {
       /* past grace period, move on to lastwait. clear polled flag, to make sure
        * it gets polled again before we clear lastwait. */
       ctx->flags &= ~(CTX_FLAG_POLL_CALLED | CTX_FLAG_WANTWAIT);
@@ -988,11 +1000,13 @@ int flextcp_context_wait(struct flextcp_context *ctx, int timeout_ms)
   pfd.fd = ctx->evfd;
   pfd.events = POLLIN;
   pfd.revents = 0;
+  printf("sleeping on fd %d\n", pfd.fd);
   ret = poll(&pfd, 1, timeout_ms);
   if (ret < 0) {
     perror("flextcp_context_wait: poll returned error");
     return -1;
   }
+  printf("woke up\n");
 
   flextcp_context_waitclear(ctx);
   return 0;
