@@ -537,6 +537,7 @@ static int conn_arp_done(struct connection *conn)
 static int conn_syn_sent_packet(struct connection *c, const struct pkt_tcp *p,
     const struct tcp_opts *opts)
 {
+  printf("conn syn packet\n");
   uint32_t ecn_flags = TCPH_FLAGS(&p->tcp) & (TCP_ECE | TCP_CWR);
 
   /* dis-arm timeout */
@@ -667,7 +668,7 @@ static inline struct connection *conn_alloc(struct app_context* ctx, uint32_t rq
     rx_endpoint.addr = rq_addr;
     rx_endpoint.lkey = lkey;
     rx_endpoint.rkey = rkey;
-
+    rx_endpoint.offset = 0;
     int rv = rq_pair_receiver(conn->rx, rx_endpoint);
     assert(rv == 0);
   }

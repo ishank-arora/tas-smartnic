@@ -133,15 +133,17 @@ static int on_connection(void* context) {
 
 static int on_disconnect(struct rdma_cm_id* id) {
     struct rdma_connection *conn = (struct rdma_connection*) id->context;
-    printf("peer disconnected.\n");
+    fprintf(stderr, "peer (%lx) disconnected.\n", (uintptr_t) conn);
+    // TODO: figure out why trying to free resouces leads to seg fault
     rdma_destroy_qp(id);
-    // TODO: why does deregistering memory seg fault?
-    // ibv_dereg_mr(conn->receive_buffer_mr);
-    // ibv_dereg_mr(conn->send_buffer_mr);
-    // rdma_destroy_id(id);
+    ibv_dereg_mr(conn->receive_buffer_mr);
+    ibv_dereg_mr(conn->send_buffer_mr);
+    rdma_destroy_id(id); // This triggers seg fault for some reason
 
     rdma_common_free_conn_context(conn);
+    fprintf(stderr, "freeing receive buffer at addr (%lx)\n", (uintptr_t) conn->receive_buffer);
     free(conn->receive_buffer);
+    fprintf(stderr, "freeing send buffer at addr (%lx)\n", (uintptr_t) conn->send_buffer);
     free(conn->send_buffer);
     free(conn);
     return 0;
@@ -186,6 +188,7 @@ static int handle_recv_bases(struct rdma_connection* conn, const struct rdma_msg
 
 static int handle_recv_app_reg(struct rdma_connection* conn, const struct rdma_msg* msg) {
     assert(strcmp(msg->data.app_reg.magic, FLEXNIC_MAGIC_STR) == 0);
+    printf("handle_recv_app_reg: received application registration\n");
     struct communicator comm;
     comm.type = CT_REMOTE;
     comm.method.remote_fd.conn = conn;
@@ -197,11 +200,14 @@ static int handle_recv_app_reg(struct rdma_connection* conn, const struct rdma_m
     if (app != NULL) {
         conn->context = app;
         app->rdma_conn = conn;
+        printf("handle_recv_app_reg: successfully registered application\n");
+    } else {
+        printf("handle_recv_app_reg: failed to register application\n");
     }
-    to_send.data.app_reg_ack.success = app != NULL;
+    to_send.data.app_reg_ack.success = (app != NULL);
     to_send.data.app_reg_ack.tas_shm_opaque = (uintptr_t) tas_shm;
-    to_send.data.app_reg_ack.tas_shm_lkey = (uint32_t) tas_info_mr->lkey;
-    to_send.data.app_reg_ack.tas_shm_rkey = (uint32_t) tas_info_mr->rkey;
+    to_send.data.app_reg_ack.tas_shm_lkey = (uint32_t) tas_shm_mr->lkey;
+    to_send.data.app_reg_ack.tas_shm_rkey = (uint32_t) tas_shm_mr->rkey;
     if (rdma_send_msg(conn, to_send) != 0) {
         fprintf(stderr, "handle_recv_app_reg: failed to send ack\n");
         abort();
@@ -210,11 +216,12 @@ static int handle_recv_app_reg(struct rdma_connection* conn, const struct rdma_m
 }
 
 static int handle_recv_wakeup(struct rdma_connection* conn, const struct rdma_msg* msg) {
+    printf("handle_recv_wakeup: woke up by tas_host\n");
     assert(conn->context_type == RCONN_TYPE_INTERFACE);
     if (msg->data.wakeup_tas_info.wakeup_slow) {
         uint64_t val = 1;
         int r = write(kernel_notifyfd, &val, sizeof(uint64_t));
-        if (r != 0) {
+        if (r != sizeof(uint64_t)) {
             perror("handle_recv_wakeup: failed to notify kernel");
             return -1;
         }
@@ -231,7 +238,7 @@ static int handle_recv_wakeup(struct rdma_connection* conn, const struct rdma_ms
         if ((wakeup_fast & 0b1) != 0) {
             uint64_t val = 1;
             int r = write(ctxs[to_wakeup]->evfd, &val, sizeof(uint64_t));
-            if (r != 0) {
+            if (r != sizeof(uint64_t)) {
                 fprintf(stderr, "handle_recv_wakeup: failed to notify fp core %d: %s\n", 
                     to_wakeup, strerror(errno));
                 return -1;
@@ -251,9 +258,11 @@ static int handle_imm_signal(struct rdma_connection* conn) {
 
 static int handle_recv_reg_ctx(struct rdma_connection* conn, const struct rdma_msg* msg) {
     assert(conn->context_type == RCONN_TYPE_APP);
+    printf("handle_recv_reg_ctx: received request to register context\n");
+
     /* allocate memory queues */
-    size_t kin_qsize = config.app_kin_len + sizeof(struct rdma_queue*);
-    size_t kout_qsize = config.app_kout_len + sizeof(struct rdma_queue*);
+    size_t kin_qsize = config.app_kin_len + sizeof(struct rdma_queue);
+    size_t kout_qsize = config.app_kout_len + sizeof(struct rdma_queue);
     uint64_t nic_rx_len = msg->data.ctx_reg.rx_len + sizeof(struct rdma_queue);
     uint64_t nic_tx_len = msg->data.ctx_reg.tx_len + sizeof(struct rdma_queue);
     uint64_t bytes_needed = kin_qsize + kout_qsize + (nic_rx_len + nic_tx_len) * tas_info->cores_num;
@@ -278,27 +287,33 @@ static int handle_recv_reg_ctx(struct rdma_connection* conn, const struct rdma_m
     struct rdma_queue_endpoint rx_endpoint;
     rx_endpoint.addr = app_base_opaque;
     rx_endpoint.offset = 0;
-    rx_endpoint.lkey = ctx_buffer_mr->lkey;
-    rx_endpoint.rkey = ctx_buffer_mr->rkey;
+    rx_endpoint.lkey = msg->data.ctx_reg.lkey;
+    rx_endpoint.rkey = msg->data.ctx_reg.rkey;
 
     q = rq_allocate_in_place((void*) (ctx_buffer_opaque + offset), kin_qsize, conn->qp, ctx_buffer_mr->lkey, ctx_buffer_mr->rkey);
-    rv = rq_pair_receiver(q, rx_endpoint);
-    assert(rv == 0);
     offset += kin_qsize;
     rx_endpoint.addr += kin_qsize;
+    assert((uintptr_t) q + q->buffer_size + sizeof(struct rdma_queue) == ctx_buffer_opaque + offset);
 
+    assert(conn->qp != NULL);
     q = rq_allocate_in_place((void*) (ctx_buffer_opaque + offset), kout_qsize, conn->qp, ctx_buffer_mr->lkey, ctx_buffer_mr->rkey);
+    rv = rq_pair_receiver(q, rx_endpoint);
+    assert(rv == 0);
     offset += kout_qsize;
     rx_endpoint.addr += kout_qsize;
+    assert((uintptr_t) q + q->buffer_size + sizeof(struct rdma_queue) == ctx_buffer_opaque + offset);
+
     for (int i = 0; i < tas_info->cores_num; i++) {
       q = rq_allocate_in_place((void*) (ctx_buffer_opaque + offset), nic_rx_len, conn->qp, ctx_buffer_mr->lkey, ctx_buffer_mr->rkey);
       rv = rq_pair_receiver(q, rx_endpoint);
       offset += nic_rx_len;
       rx_endpoint.addr += nic_rx_len;
+      assert((uintptr_t) q + q->buffer_size + sizeof(struct rdma_queue) == ctx_buffer_opaque + offset);
       
       q = rq_allocate_in_place((void*) (ctx_buffer_opaque + offset), nic_tx_len, conn->qp, ctx_buffer_mr->lkey, ctx_buffer_mr->rkey);
       offset += nic_tx_len;
       rx_endpoint.addr += nic_tx_len;
+      assert((uintptr_t) q + q->buffer_size + sizeof(struct rdma_queue) == ctx_buffer_opaque + offset);
     }
     assert(offset == bytes_needed);
 
@@ -307,20 +322,11 @@ static int handle_recv_reg_ctx(struct rdma_connection* conn, const struct rdma_m
     comm.type = CT_REMOTE;
     comm.method.remote_fd.fd = msg->data.ctx_reg.ctx_evfd;
     comm.method.remote_fd.conn = conn;
-    struct app_context* app_ctx = allocate_remote_app_context(app, comm, ctx_buffer, config.app_kin_len, config.app_kout_len);
-    if (app_ctx != NULL) {
-        struct rdma_msg msg;
-        msg.type = RDMA_MSG_ACK_CTX_REG;
-        struct rdma_ack_ctx_register ctx_reg_ack;
-        ctx_reg_ack.memq_base = ctx_buffer_opaque;
-        ctx_reg_ack.lkey = ctx_buffer_mr->lkey;
-        ctx_reg_ack.rkey = ctx_buffer_mr->rkey;
-        msg.data.ctx_reg_ack = ctx_reg_ack;
-        if (rdma_send_msg(conn, msg) != 0) {
-            fprintf(stderr, "handle_recv_reg_ctx: failed to send ack\n");
-            abort();
-        }
-    }
+    allocate_remote_app_context(
+        app, comm, ctx_buffer, 
+        msg->data.ctx_reg.rx_len, msg->data.ctx_reg.tx_len, 
+        ctx_buffer_mr
+    );
     return 0;
 }
 

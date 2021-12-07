@@ -206,9 +206,9 @@ int nicif_connection_add(uint32_t db, uint64_t mac_remote, uint32_t ip_local,
   fs->opaque = app_opaque;
   fs->rx_flags = rx_flags;
   fs->rx = rx;
-  assert(fs->rx->endpoints.rx.addr == (uintptr_t) fs->rx);
+  assert(fs->rx->endpoints.tx.addr == (uintptr_t) fs->rx);
   fs->tx = tx;
-  assert(fs->tx->endpoints.tx.addr == (uintptr_t) fs->tx);
+  assert(fs->tx->endpoints.rx.addr == (uintptr_t) fs->tx);
   memcpy(&fs->remote_mac, &mac_remote, ETH_ADDR_LEN);
   fs->db_id = db;
 

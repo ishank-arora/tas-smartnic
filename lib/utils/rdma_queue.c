@@ -198,6 +198,15 @@ ssize_t rq_nflush(struct rdma_queue* queue, size_t to_flush) {
                 }
             }
         }
+
+        /* update receiver */
+        if (total_flushed > 0) {
+            from.addr = (uintptr_t) &queue->endpoints.tx.offset;
+            to.addr = queue->endpoints.rx.addr + offsetof(struct rdma_queue, endpoints.tx.offset);
+            if (rdma_write(queue->qp, from, to, sizeof(queue->endpoints.tx.offset)) < 0) {
+                fprintf(stderr, "rq_flush: failed to write new offset to remote\n");
+            }
+        }
     }
     return total_flushed;
 }

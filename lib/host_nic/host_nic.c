@@ -30,9 +30,6 @@ struct host_nic_context* allocate_host_nic_context(
 
 int deallocate_host_nic_context(struct host_nic_context* ctx) {
     ibv_dereg_mr(ctx->tas_info_mr);
-    int rv;
-    if ((rv = munmap(ctx, ctx->queue_size)) != 0) {
-        return rv;
-    }
+    // Figure out why this leads to segfault
     return 0;
 }

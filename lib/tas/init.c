@@ -523,7 +523,7 @@ static inline int event_kappin_conn_opened(
     int rv;
     struct rdma_queue_endpoint rx_endpoint;
     struct rdma_app_context* app_ctx = (struct rdma_app_context*) nic_conn->context;
-    rx_endpoint.addr = app_ctx->rapp_info.tas_shm_opaque + inev->rx_off;
+    rx_endpoint.addr = app_ctx->rapp_info.tas_shm_opaque + inev->tx_off;
     rx_endpoint.lkey = app_ctx->rapp_info.tas_shm_lkey;
     rx_endpoint.rkey = app_ctx->rapp_info.tas_shm_rkey;
     rv = rq_pair_receiver(conn->tx, rx_endpoint);
@@ -607,7 +607,7 @@ static inline int event_kappin_accept_conn(
     int rv;
     struct rdma_queue_endpoint rx_endpoint;
     struct rdma_app_context* app_ctx = (struct rdma_app_context*) nic_conn->context;
-    rx_endpoint.addr = app_ctx->rapp_info.tas_shm_opaque + inev->rx_off;
+    rx_endpoint.addr = app_ctx->rapp_info.tas_shm_opaque + inev->tx_off;
     rx_endpoint.lkey = app_ctx->rapp_info.tas_shm_lkey;
     rx_endpoint.rkey = app_ctx->rapp_info.tas_shm_rkey;
     rv = rq_pair_receiver(conn->tx, rx_endpoint);

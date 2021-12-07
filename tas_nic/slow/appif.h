@@ -79,6 +79,7 @@ struct application {
       void* base;
       int app_out_len;
       int app_in_len;
+      struct ibv_mr* mr;
     } queues;
   } buffer;
 
@@ -131,7 +132,7 @@ static inline struct rdma_queue* app_get_flexnic_rq(struct application* app, int
     case CT_REMOTE: {
       struct rdma_queue* kout = app_get_kout(app);
       int skip_sz = 2 * sizeof(struct rdma_queue) + app->buffer.queues.app_in_len + app->buffer.queues.app_out_len;
-      return (struct rdma_queue*) ((uintptr_t) kout + skip_sz * q);
+      return (struct rdma_queue*) ((uintptr_t) kout + sizeof(struct rdma_queue) + kout->buffer_size + skip_sz * q);
     }
   }
   fprintf(stderr, "app_get_flexnic_rq: unreachable\n");
@@ -146,7 +147,7 @@ static inline struct rdma_queue* app_get_flexnic_tq(struct application* app, int
     }
     case CT_REMOTE: {
       struct rdma_queue* rq = app_get_flexnic_rq(app, q);
-      int offset = sizeof(struct rdma_queue) + app->buffer.queues.app_in_len;
+      int offset = sizeof(struct rdma_queue) + rq->buffer_size;
       return (struct rdma_queue*) ((uintptr_t) rq + offset);
     }
   }
@@ -169,7 +170,8 @@ struct app_context* allocate_remote_app_context(
   struct communicator ctx_comm,
   void* base,
   size_t app_in_len,
-  size_t app_out_len
+  size_t app_out_len,
+  struct ibv_mr* mr
 );
 
 #endif /* ndef APPIF_H_ */

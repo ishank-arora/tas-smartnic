@@ -155,7 +155,9 @@ unsigned appif_poll(void)
 
       for (i = 0; i < tas_info->cores_num; i++) {
         rxqs[i] = app_get_flexnic_rq(app, i);
+        assert(rxqs[i]->endpoints.tx.addr == (uintptr_t) rxqs[i]);
         txqs[i] = app_get_flexnic_tq(app, i);
+        assert(txqs[i]->endpoints.rx.addr == (uintptr_t) txqs[i]);
       }
 
       if (nicif_appctx_add(app->id, ctx->doorbell->id, rxqs,
@@ -535,7 +537,8 @@ struct app_context* allocate_remote_app_context(
   struct communicator ctx_comm,
   void* base,
   size_t app_in_len,
-  size_t app_out_len
+  size_t app_out_len,
+  struct ibv_mr* mr
 ) {
   struct app_context* ctx;
   size_t ctx_sz;
@@ -550,6 +553,7 @@ struct app_context* allocate_remote_app_context(
   app->buffer.queues.base = base;
   app->buffer.queues.app_in_len = app_in_len;
   app->buffer.queues.app_out_len = app_out_len;
+  app->buffer.queues.mr = mr;
 
   /* allocate doorbell */
   // TODO: solve race condition for applications running on the NIC and the host
@@ -697,22 +701,35 @@ static void uxsocket_notify_app(struct application *app)
   /* send out response */
   ssize_t tx = -1;
   switch (app->comm.type) {
-    case CT_LOCAL:
+    case CT_LOCAL: {
       tx = send(app->comm.method.fd, app->buffer.resp, app->resp_sz, 0);
+      if (tx < 0) {
+        fprintf(stderr, "app->comm.fd: %d\n", app->comm.method.fd);
+        perror("uxsocket_notify_app: send failed");
+        goto error_send;
+      } else if (tx < app->resp_sz) {
+        /* FIXME */
+        fprintf(stderr, "uxsocket_notify_app: short send for response (TODO)\n");
+        goto error_send;
+      }
       break;
-    case CT_REMOTE:
-      // TODO: implement remote notify
-      tx = -1;
+    }
+    case CT_REMOTE: {
+      struct rdma_msg msg;
+      msg.type = RDMA_MSG_ACK_CTX_REG;
+      struct rdma_ack_ctx_register ctx_reg_ack;
+      ctx_reg_ack.memq_base = (uintptr_t) app->buffer.queues.base;
+      ctx_reg_ack.lkey = app->buffer.queues.mr->lkey;
+      ctx_reg_ack.rkey = app->buffer.queues.mr->rkey;
+      ctx_reg_ack.flexnic_db_id = ctx->doorbell->id;
+      ctx_reg_ack.flexnic_qs_num = tas_info->cores_num;
+      msg.data.ctx_reg_ack = ctx_reg_ack;
+      if (rdma_send_msg(app->rdma_conn, msg) != 0) {
+          fprintf(stderr, "handle_recv_reg_ctx: failed to send ack\n");
+          abort();
+      }
       break;
-  }
-  if (tx < 0) {
-    fprintf(stderr, "app->comm.fd: %d\n", app->comm.method.fd);
-    perror("uxsocket_notify_app: send failed");
-    goto error_send;
-  } else if (tx < app->resp_sz) {
-    /* FIXME */
-    fprintf(stderr, "uxsocket_notify_app: short send for response (TODO)\n");
-    goto error_send;
+    }
   }
 
   if (app->comm.type == CT_LOCAL) {

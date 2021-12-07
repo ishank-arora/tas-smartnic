@@ -60,8 +60,6 @@ static inline void notify_communicator(struct communicator* comm, uint64_t *last
         msg.data.wakeup_app_info.fd = comm->method.remote_fd.fd;
         int rv = rdma_send_msg(tas_host_conn, msg);
         assert(rv == 0);
-        fprintf(stderr, "notify_communicator: write failed\n");
-        abort();
         break;
       }
     }
@@ -81,17 +79,20 @@ static void notify_core(int cfd, uint64_t *last_ts, uint64_t tsc,
 
 void notify_fastpath_core(unsigned core)
 {
+  printf("notify_fp_core called\n");
   notify_communicator(&fp_state->kctx[core].ctx_comm, &fp_state->kctx[core].last_ts,
       util_rdtsc(), tas_info->poll_cycle_tas);
 }
 
 void notify_app_communicator(struct communicator* comm, uint64_t *last_ts)
 {
+  printf("notify_app_communicator called\n");
   notify_communicator(comm, last_ts, util_rdtsc(), tas_info->poll_cycle_app);
 }
 
 void notify_appctx(struct flextcp_pl_appctx *ctx, uint64_t tsc)
 {
+  printf("notify_appctx called\n");
   notify_communicator(&ctx->ctx_comm, &ctx->last_ts, tsc, tas_info->poll_cycle_app);
 }
 

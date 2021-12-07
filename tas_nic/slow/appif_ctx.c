@@ -83,8 +83,8 @@ void appif_conn_opened(struct connection *c, int status)
   kout.data.conn_opened.status = status;
   if (status == 0) {
     // TODO: send data on remote and local keys and receive data on remote and local keys
-    assert((uintptr_t) c->rx == c->rx->endpoints.rx.addr);
-    assert((uintptr_t) c->tx == c->tx->endpoints.tx.addr);
+    assert((uintptr_t) c->rx == c->rx->endpoints.tx.addr);
+    assert((uintptr_t) c->tx == c->tx->endpoints.rx.addr);
     kout.data.conn_opened.rx_off = (uintptr_t) c->rx - (uintptr_t) tas_shm;
     kout.data.conn_opened.tx_off = (uintptr_t) c->tx - (uintptr_t) tas_shm;
 
@@ -105,6 +105,7 @@ void appif_conn_opened(struct connection *c, int status)
 
   MEM_BARRIER();
 
+  printf("appif_conn_opened calls ctx_kick?\n");
   appif_ctx_kick(ctx);
 
 }
@@ -129,6 +130,8 @@ void appif_conn_closed(struct connection *c, int status)
   /* make sure we have room for a response */
   enqueue_and_flush_kout(ctx, kout);
   MEM_BARRIER();
+
+  printf("appif_conn_closed calls ctx_kick?\n");
   appif_ctx_kick(ctx);
 
   /* remove from app connection list */
@@ -164,6 +167,8 @@ void appif_listen_newconn(struct listener *l, uint32_t remote_ip,
   kout.type = KERNEL_APPIN_LISTEN_NEWCONN;
   enqueue_and_flush_kout(ctx, kout);
   MEM_BARRIER();
+
+  printf("appif_listen_newconn calls ctx_kick?\n");
   appif_ctx_kick(ctx);
 }
 
@@ -182,8 +187,8 @@ void appif_accept_conn(struct connection *c, int status)
   kout.data.accept_connection.opaque = c->opaque;
   kout.data.accept_connection.status = status;
   if (status == 0) {
-    assert((uintptr_t) c->rx == c->rx->endpoints.rx.addr);
-    assert((uintptr_t) c->tx == c->tx->endpoints.tx.addr);
+    assert((uintptr_t) c->rx == c->rx->endpoints.tx.addr);
+    assert((uintptr_t) c->tx == c->tx->endpoints.rx.addr);
     kout.data.accept_connection.rx_off = (uintptr_t) c->rx - (uintptr_t) tas_shm;
     kout.data.accept_connection.tx_off = (uintptr_t) c->tx - (uintptr_t) tas_shm;
 
@@ -204,6 +209,8 @@ void appif_accept_conn(struct connection *c, int status)
   kout.type = KERNEL_APPIN_ACCEPTED_CONN;
   enqueue_and_flush_kout(ctx, kout);
   MEM_BARRIER();
+
+  printf("appif_accept_conn calls ctx_kick?\n");
   appif_ctx_kick(ctx);
 }
 
@@ -276,6 +283,8 @@ unsigned appif_ctx_poll(struct application *app, struct app_context *ctx)
     }
     enqueue_and_flush_kout(ctx, kout);
     MEM_BARRIER();
+
+    printf("appif_ctx_poll calls ctx_kick?\n");
     appif_ctx_kick(ctx);
   }
 
@@ -449,6 +458,8 @@ error:
   kout->data.accept_connection.status = -1;
   MEM_BARRIER();
   kout->type = KERNEL_APPIN_ACCEPTED_CONN;
+
+  printf("kin_accept_connect calls ctx_kick?\n");
   appif_ctx_kick(ctx);
   return 1;
 }
