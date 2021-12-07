@@ -135,10 +135,9 @@ static int on_disconnect(struct rdma_cm_id* id) {
     struct rdma_connection *conn = (struct rdma_connection*) id->context;
     printf("peer disconnected.\n");
     rdma_destroy_qp(id);
-    // TODO: why does deregistering memory seg fault?
-    // ibv_dereg_mr(conn->receive_buffer_mr);
-    // ibv_dereg_mr(conn->send_buffer_mr);
-    // rdma_destroy_id(id);
+    ibv_dereg_mr(conn->receive_buffer_mr);
+    ibv_dereg_mr(conn->send_buffer_mr);
+    // rdma_destroy_id(id); This triggers seg fault for some reason
 
     rdma_common_free_conn_context(conn);
     free(conn->receive_buffer);

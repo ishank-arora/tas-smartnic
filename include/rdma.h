@@ -60,6 +60,8 @@ struct rdma_ack_ctx_register {
     uint64_t memq_base; 
     uint32_t lkey;
     uint32_t rkey;
+    uint16_t flexnic_db_id;
+    uint16_t flexnic_qs_num;
 };
 
 struct rdma_wakeup_tas {

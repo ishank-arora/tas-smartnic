@@ -178,4 +178,12 @@ ssize_t rq_nflush(struct rdma_queue* queue, size_t to_flush);
  * @return ssize_t negative on failure, else number of bytes flushed 
  */
 ssize_t rq_flush(struct rdma_queue* queue);
+
+/**
+ * @brief Returns the maximum amount of bytes that can be reserved
+ * 
+ * @param queue the queue to query
+ * @return ssize_t negative on failure, else the number of bytes
+ */
+ssize_t rq_nbytes_can_reserve(struct rdma_queue* queue);
 #endif

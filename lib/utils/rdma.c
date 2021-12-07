@@ -62,6 +62,7 @@ int rdma_send_msg(struct rdma_connection* conn, struct rdma_msg msg) {
         conn->send_off -= RC_MAX_OUTGOING;
     }
     conn->n_to_send++;
+    printf("sending buffer at addr %lx, idx: %ld\n", (uintptr_t) send_buffer, conn->send_off);
     sge.addr = (uintptr_t) send_buffer;
     
 

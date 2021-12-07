@@ -702,8 +702,7 @@ static void uxsocket_notify_app(struct application *app)
       break;
     case CT_REMOTE:
       // TODO: implement remote notify
-      tx = -1;
-      break;
+      return;
   }
   if (tx < 0) {
     fprintf(stderr, "app->comm.fd: %d\n", app->comm.method.fd);

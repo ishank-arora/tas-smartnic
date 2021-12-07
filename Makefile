@@ -6,10 +6,10 @@
 OPT ?= 3
 CPPFLAGS += -Iinclude/
 CPPFLAGS += $(EXTRA_CPPFLAGS)
-CFLAGS += -std=gnu99 -O${OPT} -g -Wall -Werror -march=native -fno-omit-frame-pointer
+CFLAGS += -std=gnu99 -O${OPT} -flto -g -Wall -Werror -march=native -fno-omit-frame-pointer
 CFLAGS += $(EXTRA_CFLAGS)
 CFLAGS_SHARED += $(CFLAGS) -fPIC
-LDFLAGS += -pthread -g
+LDFLAGS += -flto -pthread -g
 LDFLAGS += $(EXTRA_LDFLAGS)
 LDLIBS += -lm -lpthread -lrt -ldl
 LDLIBS += $(EXTRA_LDLIBS)
@@ -75,8 +75,8 @@ include $(dir)/rules.mk
 dir := tas_host
 include $(dir)/rules.mk
 
-dir := tas_nic
-include $(dir)/rules.mk
+#dir := tas_nic
+#include $(dir)/rules.mk
 
 dir := tools
 include $(dir)/rules.mk

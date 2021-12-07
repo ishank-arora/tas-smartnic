@@ -27,14 +27,21 @@ const int TIMEOUT_IN_MS = 500;
 int on_nicif_event() {
     struct epoll_event event[2];
     int n = epoll_wait(epfd, event, 2, 0);
-    int i, rv;
+    int i = 0; 
+    int rv = 0;
 
     for (i = 0; i < n; i++) {
         int fd = event[i].data.fd;
         if (fd == event_chn->fd) {
             rv = on_rdma_client_event();
+            if (rv != 0) {
+                fprintf(stderr, "on_nic_event: on_rdma_client_event failed\n");
+            }
         } else if (ctx->comp_chn != NULL && fd == ctx->comp_chn->fd) {
             rv = rdma_common_on_completion(ctx->comp_chn);
+            if (rv != 0) {
+                fprintf(stderr, "on_nic_event: rdma_common_on_completion failed\n");
+            }
         } else {
             rv = -1;
             fprintf(stderr, "on_nicif_event: got event from unknown file descriptor\n");
@@ -132,27 +139,31 @@ static int on_connection(void* context) {
 static int handle_recv_bases(struct rdma_connection* conn, const struct rdma_msg* msg) {
     assert(conn->context_type == RCONN_TYPE_INTERFACE);
     struct host_nic_context* hn_ctx = (struct host_nic_context*) conn->context;
-    
     printf("received tas_info bases\n");
+    MEM_BARRIER();
     hn_ctx->bases = msg->data.bases;
     hn_ctx->flags |= RC_FLAG_RECEIVED_BASES;
-    tas_info->nic_ip = config.ip;
-    tas_info->nic_port = config.port;
     return 0;
 }
 
 static int handle_imm_tas_info(struct rdma_connection* conn) {
     printf("tas_info written locally\n");
+    struct host_nic_context* hn_ctx = (struct host_nic_context*) conn->context;
     if (strcmp(tas_info->magic, FLEXNIC_MAGIC_STR) != 0) {
         fprintf(stderr, "on_completion: tas_info does not contain correct magic str (str: %s)\n", tas_info->magic);
         return -1;
     }
+    ((volatile struct flexnic_info*) tas_info)->nic_ip = config.ip;
+    ((volatile struct flexnic_info*) tas_info)->nic_port = config.port;
+    MEM_BARRIER();
+    hn_ctx->flags |= RC_FLAG_RECEIVED_INFO;
     return 0;
 }
 
 static int handle_wakeup(struct rdma_connection* conn, const struct rdma_msg* msg) {
     assert(conn->context_type == RCONN_TYPE_INTERFACE);
     int fd = msg->data.wakeup_app_info.fd;
+    printf("handle_wakeup: waking up host application with fd %d\n", fd);
     uint64_t val = 1;
     if (write(fd, &val, sizeof(uint64_t)) != sizeof(uint64_t)) {
         perror("handle_wakeup: write failed");
@@ -172,7 +183,7 @@ static int on_disconnect(struct rdma_cm_id* id) {
     rdma_common_free_conn_context(conn);
     free(conn);
     rdma_destroy_id(id);
-    return 1;
+    return -1;
 }
 
 int nicif_init(int* fd) {
@@ -235,16 +246,20 @@ int nicif_init(int* fd) {
     assert(rv == 0);
 
     /* wait for connection made with host */
-    while (1) {
+    while (nic_conn == NULL ||
+                nic_conn->context == NULL) {
         if (on_nicif_event() != 0) {
             fprintf(stderr, "nicif_init: unable to handle nicif event\n");
             goto error_exit;
         }
+    }
 
-        if (nic_conn != NULL &&
-                nic_conn->context != NULL && 
-                ((struct host_nic_context*) nic_conn->context)->flags & RC_FLAG_RECEIVED_BASES) {
-            break;
+    /* get tas info */
+    struct host_nic_context* hn_ctx = (struct host_nic_context*) nic_conn->context;
+    while ((hn_ctx->flags & RC_FLAG_RECEIVED_INFO) != RC_FLAG_RECEIVED_INFO) {
+        if (on_nicif_event() != 0) {
+            fprintf(stderr, "nicif_init: unable to handle nicif event\n");
+            goto error_exit;
         }
     }
 
