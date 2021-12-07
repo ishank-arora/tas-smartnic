@@ -19,6 +19,20 @@ The repo consists of three main components - `lib`, `tas_host` and `tas_nic`. Th
 `tas_host` is the part of the TAS stack that is implemented to be run on the host - specifically, it houses the implementatio to connect and flush to the RDMA queues on the NIC.  
 `tas_nic` is the fast and slow path of TAS that runs on the NIC.  
 
+## How to build
+
+On the host, the only folders that need to be made are the `lib/` and `tas_host` folders. For convenience, we provide a modified Makefile which accounts for that. So, on the host, run:
+
+```bash
+$ make -f MakefileHost
+```
+
+On the SmartNic, we simply just build all the folders. Assuming that dpdk is installed in `~/dpdk-inst` TAS can be built as follows:
+
+```bash
+$ make RTE_SDK=~/dpdk-inst
+```
+
 ## How to run
 
 *Some definitions:* A host refers to the main compute machine on which applications are run. Inside the host, there is a SmartNIC. We can run applications on SmartNIC too.
@@ -27,7 +41,7 @@ The repo consists of three main components - `lib`, `tas_host` and `tas_nic`. Th
 So, on the host, we run:
 
 ```bash
-$ arp -s [IP_address_of_SmartNIC] [MAC_address_of_SmartNIC]`
+$ arp -s [IP_address_of_SmartNIC] [MAC_address_of_SmartNIC]
 $ tas_host/tas_host
 ```
 
